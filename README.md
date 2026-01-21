@@ -296,40 +296,25 @@ Confirm (Y/N): _
 ---
 
 ## 8) Cấu trúc thư mục (đề xuất)
-student-attendance-system/
+```text
+.
 ├── src/
-│   ├── __init__.py
 │   ├── main.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── enums.py
-│   ├── repositories/
-│   │   ├── __init__.py
-│   │   ├── db.py
-│   │   └── user_repo.py
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── auth_service.py
-│   │   ├── session_service.py
-│   │   ├── attendance_service.py
-│   │   ├── request_service.py
-│   │   ├── report_service.py
-│   │   └── admin_service.py
-│   ├── ui/
-│   │   ├── __init__.py
-│   │   ├── menus.py
-│   │   └── prompts.py
-│   └── utils/
-│       ├── __init__.py
-│       ├── security.py
-│       ├── validators.py
-│       └── time_utils.py
-├── data/
-│   └── (tự tạo sas.db khi chạy)
-├── reports/
+│   ├── ui/                 # menu theo role, màn hình console
+│   ├── services/           # nghiệp vụ (session, check-in, requests, report)
+│   ├── repositories/       # thao tác SQLite
+│   ├── models/             # entity/dto/enum
+│   └── utils/              # validate, security (hash/lock), time, file
+├── db/
+│   ├── schema.sql
+│   └── seed.sql
+├── data/                   # sas.db (SQLite)
+├── reports/                # file Excel xuất ra
+├── tests/                  # pytest
 ├── requirements.txt
-└── Dockerfile   (tuỳ chọn)
-
+├── Dockerfile
+└── README.md
+```
 
 ---
 

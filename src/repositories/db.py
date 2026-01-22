@@ -4,7 +4,13 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from src.models.enums import Role, SessionStatus, RequestStatus
+from src.models.enums import (
+    Role,
+    SessionStatus,
+    AttendanceStatus,
+    RequestType,
+    RequestStatus,
+)
 from src.utils.security import hash_password
 from src.utils.time_utils import now
 
@@ -12,7 +18,7 @@ DB_PATH = Path("data") / "sas.db"
 
 
 def get_conn(path: Optional[Path] = None) -> sqlite3.Connection:
-    """Create a SQLite connection with common PRAGMAs."""
+    """Open SQLite connection with common PRAGMAs enabled."""
     db_path = path or DB_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -25,23 +31,24 @@ def get_conn(path: Optional[Path] = None) -> sqlite3.Connection:
 
 def init_db() -> None:
     """
-    Initialize database schema + seed sample data (only if DB is empty).
+    Initialize DB schema + indexes + seed demo data.
 
-    NOTE: This is skeleton schema that supports all use cases at minimum.
-    You can adjust columns/constraints to match your Stage 2 design exactly.
+    Note: Adjust columns if your Stage 2 design has extra fields,
+    but this schema is safe and supports all use cases.
     """
     conn = get_conn()
     cur = conn.cursor()
 
+    # --- Schema (with constraints + ON DELETE rules) ---
     cur.executescript(
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS users (
             user_id         INTEGER PRIMARY KEY AUTOINCREMENT,
             username        TEXT NOT NULL UNIQUE,
             full_name       TEXT NOT NULL,
-            role            TEXT NOT NULL,
+            role            TEXT NOT NULL CHECK (role IN ('{Role.STUDENT.value}','{Role.LECTURER.value}','{Role.ADMIN.value}')),
             password_hash   TEXT NOT NULL,
-            failed_attempts INTEGER NOT NULL DEFAULT 0,
+            failed_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_attempts >= 0),
             locked_until    TEXT NULL
         );
 
@@ -50,55 +57,61 @@ def init_db() -> None:
             class_code  TEXT NOT NULL UNIQUE,
             class_name  TEXT NOT NULL,
             lecturer_id INTEGER NOT NULL,
-            FOREIGN KEY (lecturer_id) REFERENCES users(user_id)
+            FOREIGN KEY (lecturer_id) REFERENCES users(user_id) ON DELETE RESTRICT
         );
 
         CREATE TABLE IF NOT EXISTS enrollments (
             class_id   INTEGER NOT NULL,
             student_id INTEGER NOT NULL,
             PRIMARY KEY (class_id, student_id),
-            FOREIGN KEY (class_id) REFERENCES classes(class_id),
-            FOREIGN KEY (student_id) REFERENCES users(user_id)
+            FOREIGN KEY (class_id) REFERENCES classes(class_id) ON DELETE CASCADE,
+            FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS attendance_sessions (
             session_id   INTEGER PRIMARY KEY AUTOINCREMENT,
             class_id     INTEGER NOT NULL,
-            session_date TEXT NOT NULL,       -- YYYY-MM-DD
-            start_time   TEXT NOT NULL,       -- HH:MM
-            duration_min INTEGER NOT NULL,
-            pin_enabled  INTEGER NOT NULL DEFAULT 0,
+            session_date TEXT NOT NULL,    -- YYYY-MM-DD
+            start_time   TEXT NOT NULL,    -- HH:MM
+            duration_min INTEGER NOT NULL CHECK (duration_min > 0),
+            pin_enabled  INTEGER NOT NULL DEFAULT 0 CHECK (pin_enabled IN (0,1)),
             pin_code     TEXT NULL,
-            status       TEXT NOT NULL,
+            status       TEXT NOT NULL CHECK (status IN ('{SessionStatus.OPEN.value}','{SessionStatus.CLOSED.value}')),
             created_at   TEXT NOT NULL,
-            FOREIGN KEY (class_id) REFERENCES classes(class_id)
+            FOREIGN KEY (class_id) REFERENCES classes(class_id) ON DELETE CASCADE,
+            UNIQUE (class_id, session_date, start_time)
         );
 
         CREATE TABLE IF NOT EXISTS attendance_records (
-            record_id    INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id   INTEGER NOT NULL,
-            student_id   INTEGER NOT NULL,
-            status       TEXT NOT NULL,
-            checkin_time TEXT NULL,
-            note         TEXT NULL,
+            record_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id    INTEGER NOT NULL,
+            student_id    INTEGER NOT NULL,
+            status        TEXT NOT NULL CHECK (status IN ('{AttendanceStatus.PRESENT.value}',
+                                                         '{AttendanceStatus.LATE.value}',
+                                                         '{AttendanceStatus.ABSENT.value}',
+                                                         '{AttendanceStatus.EXCUSED.value}')),
+            checkin_time  TEXT NULL,
+            note          TEXT NULL,
             UNIQUE (session_id, student_id),
-            FOREIGN KEY (session_id) REFERENCES attendance_sessions(session_id),
-            FOREIGN KEY (student_id) REFERENCES users(user_id)
+            FOREIGN KEY (session_id) REFERENCES attendance_sessions(session_id) ON DELETE CASCADE,
+            FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS absence_requests (
             request_id       INTEGER PRIMARY KEY AUTOINCREMENT,
             student_id       INTEGER NOT NULL,
             session_id       INTEGER NOT NULL,
-            request_type     TEXT NOT NULL,
+            request_type     TEXT NOT NULL CHECK (request_type IN ('{RequestType.ABSENT.value}','{RequestType.LATE.value}')),
             reason           TEXT NOT NULL,
             evidence_path    TEXT NULL,
-            status           TEXT NOT NULL,
+            status           TEXT NOT NULL CHECK (status IN ('{RequestStatus.PENDING.value}',
+                                                            '{RequestStatus.APPROVED.value}',
+                                                            '{RequestStatus.REJECTED.value}')),
             lecturer_comment TEXT NULL,
             created_at       TEXT NOT NULL,
             updated_at       TEXT NOT NULL,
-            FOREIGN KEY (student_id) REFERENCES users(user_id),
-            FOREIGN KEY (session_id) REFERENCES attendance_sessions(session_id)
+            FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (session_id) REFERENCES attendance_sessions(session_id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS warnings (
@@ -107,17 +120,28 @@ def init_db() -> None:
             class_id   INTEGER NOT NULL,
             message    TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            seen       INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (student_id) REFERENCES users(user_id),
-            FOREIGN KEY (class_id) REFERENCES classes(class_id)
+            seen       INTEGER NOT NULL DEFAULT 0 CHECK (seen IN (0,1)),
+            FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (class_id) REFERENCES classes(class_id) ON DELETE CASCADE
         );
         """
     )
 
-    # Seed if no users exist
+    # --- Indexes (performance) ---
+    cur.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_records_session_id ON attendance_records(session_id);
+        CREATE INDEX IF NOT EXISTS idx_records_student_id ON attendance_records(student_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_class_date ON attendance_sessions(class_id, session_date);
+        CREATE INDEX IF NOT EXISTS idx_requests_session_status ON absence_requests(session_id, status);
+        """
+    )
+
+    # --- Seed demo data (only if empty users) ---
     n_users = cur.execute("SELECT COUNT(*) AS n FROM users;").fetchone()["n"]
     if n_users == 0:
         pw = hash_password("123456").value  # demo password
+
         cur.execute(
             "INSERT INTO users(username, full_name, role, password_hash) VALUES (?,?,?,?)",
             ("admin1", "Admin One", Role.ADMIN.value, pw),
@@ -149,12 +173,13 @@ def init_db() -> None:
             [(class_id, stu1_id), (class_id, stu2_id)],
         )
 
-        # (Optional) Create 1 sample session
+        # Create 1 demo OPEN session
         cur.execute(
             """
-            INSERT INTO attendance_sessions(class_id, session_date, start_time, duration_min,
-                                           pin_enabled, pin_code, status, created_at)
-            VALUES (?,?,?,?,?,?,?,?)
+            INSERT INTO attendance_sessions(
+                class_id, session_date, start_time, duration_min,
+                pin_enabled, pin_code, status, created_at
+            ) VALUES (?,?,?,?,?,?,?,?)
             """,
             (class_id, "2026-01-01", "09:00", 60, 0, None, SessionStatus.OPEN.value, now().isoformat()),
         )

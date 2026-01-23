@@ -5,12 +5,16 @@ from src.services.auth_service import AuthService
 from src.ui.menus import show_main_menu
 from src.ui.prompts import prompt_choice, prompt_text, prompt_password
 from src.models.enums import Role
+from src.ui.student_handlers import run_student_dashboard
+from src.ui.lecturer_handlers import run_lecturer_dashboard
+from src.ui.admin_handlers import AdminHandlers
 
 
 def run() -> None:
     """Entry point: init DB -> main menu -> login -> role dashboards."""
     init_db()
     auth = AuthService()
+    admin_handlers = AdminHandlers()
 
     while True:
         show_main_menu()
@@ -34,21 +38,13 @@ def run() -> None:
         if not result.ok or result.user is None:
             continue
 
-        user = result.user
-        role = user.role
-
+        role = result.user.role
         if role == Role.STUDENT.value:
-            from src.ui.student_handlers import run_student_dashboard
-            run_student_dashboard(user)
-
+            run_student_dashboard(result.user)
         elif role == Role.LECTURER.value:
-            from src.ui.lecturer_handlers import run_lecturer_dashboard
-            run_lecturer_dashboard(user)
-
+            run_lecturer_dashboard(result.user)
         elif role == Role.ADMIN.value:
-            from src.ui.admin_handlers import run_admin_dashboard
-            run_admin_dashboard(admin_id=user.user_id, admin_name=user.full_name)
-
+            admin_handlers.admin_menu()
         else:
             print("Unknown role. Please contact administrator.")
 

@@ -52,12 +52,12 @@ class AttendanceRepo:
     ) -> list[AttendanceRow]:
         conn = self._conn()
         query = "SELECT ar.* FROM attendance_records ar"
-        params = []
-        where_clauses = []
+        params: list[object] = []
+        where_clauses: list[str] = []
 
-        # Join with sessions table nếu cần filter by class_id hoặc date range
+        # Join with attendance_sessions if filtering by class_id/date range
         if class_id is not None or date_from is not None or date_to is not None:
-            query += " JOIN sessions s ON ar.session_id = s.session_id"
+            query += " JOIN attendance_sessions s ON ar.session_id = s.session_id"
 
         if student_id is not None:
             where_clauses.append("ar.student_id = ?")
@@ -110,9 +110,22 @@ class AttendanceRepo:
         conn.commit()
         if self._external_conn is None:
             conn.close()
-        return int(cur.lastrowid)
+            
+        new_id = cur.lastrowid
+        if new_id is None:
+            raise RuntimeError("Insert failed: lastrowid is None")
+        return int(new_id)
 
-    def update(self, session_id: int, student_id: int, *, status: Optional[str] = None, checkin_time: Optional[str] = None, note: Optional[str] = None) -> None:
+
+    def update(
+        self,
+        session_id: int,
+        student_id: int,
+        *,
+        status: Optional[str] = None,
+        checkin_time: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> None:
         fields, params = [], []
         if status is not None:
             fields.append("status=?")

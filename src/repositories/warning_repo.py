@@ -59,7 +59,11 @@ class WarningRepo:
         conn.commit()
         if self._external_conn is None:
             conn.close()
-        return int(cur.lastrowid)
+        new_id = cur.lastrowid
+        if new_id is None:
+            raise RuntimeError("Insert failed: lastrowid is None")
+        return int(new_id)
+
 
     def update(self, warning_id: int, *, seen: int) -> None:
         conn = self._conn()

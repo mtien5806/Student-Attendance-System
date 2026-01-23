@@ -3,100 +3,18 @@ from __future__ import annotations
 from typing import Optional, Any
 from datetime import datetime
 
-<<<<<<< HEAD
-from src.models.enums import AttendanceStatus
-from src.repositories.session_repo import SessionRepository
-from src.repositories.attendance_repo import AttendanceRepository
-=======
 from src.models.enums import AttendanceStatus, SessionStatus
+from src.utils.validators import validate_pin, validate_date_range
 from src.repositories.session_repo import SessionRepo
 from src.repositories.attendance_repo import AttendanceRepo
 from src.repositories.enrollment_repo import EnrollmentRepo
 from src.repositories.db import get_conn
->>>>>>> 3d2a3a6ce2aa9e67efd1f371c942dfa4cf195bae
 
 
 class AttendanceService:
-    """UC02 Take Attendance; UC07 Record Attendance."""
+    """UC02 Take Attendance; UC03 View Attendance; UC07 Record Attendance."""
 
     def __init__(self) -> None:
-<<<<<<< HEAD
-        self.attendance_repo = AttendanceRepository()
-
-    def student_checkin(
-        self,
-        student_id: int,
-        session_id: int,
-        pin_input: Optional[str]
-    ) -> None:
-        session = SessionRepository.get_by_id(session_id)
-        if session is None:
-            raise ValueError("Session does not exist")
-
-        if session.status != "OPEN":
-            raise ValueError("Session is not open")
-
-        if session.pin_enabled:
-            if not pin_input or pin_input != session.pin:
-                raise ValueError("Invalid PIN")
-
-        existed = AttendanceRepository.get_by_session_and_student(
-            session_id=session_id,
-            student_id=student_id
-        )
-        if existed:
-            raise ValueError("Already checked in")
-
-        AttendanceRepository.create(
-            session_id=session_id,
-            student_id=student_id,
-            status=AttendanceStatus.present.value
-            checkin_time=datetime.now()
-        )
-
-    # UC03
-    def list_student_attendance(
-        self,
-        student_id: int,
-        class_id=None,
-        date_from=None,
-        date_to=None
-    ):
-        return self.attendance_repo.list_by_filter(
-            student_id=student_id,
-            class_id=class_id,
-            date_from=date_from,
-            date_to=date_to,
-        )
-    #uc11
-    def list_warnings(self, student_id: int) -> list[dict[str, Any]]:
-        """
-        UC11: Student xem danh sách cảnh báo
-        Warning = ABSENT hoặc LATE
-        """
-        if student_id <= 0:
-            raise ValueError("student_id must be > 0")
-
-        records = self.attendance_repo.list_by_filter(student_id=student_id)
-
-        warnings = []
-        for r in records:
-            if r.status in (
-                AttendanceStatus.ABSENT.value,
-                AttendanceStatus.LATE.value,
-            ):
-                warnings.append(
-                    {
-                        "record_id": r.record_id,
-                        "session_id": r.session_id,
-                        "status": r.status,
-                        "checkin_time": r.checkin_time,
-                        "note": r.note,
-                    }
-                )
-
-        return warnings
-=======
         self.session_repo = SessionRepo()
         self.attendance_repo = AttendanceRepo()
         self.enrollment_repo = EnrollmentRepo()
@@ -108,24 +26,24 @@ class AttendanceService:
         session = self.session_repo.get_by_id(session_id)
         if not session:
             raise ValueError("Session does not exist.")
-
         if session.status != SessionStatus.OPEN.value:
             raise ValueError("Session is not open.")
 
-        # student must be enrolled in the class of this session
-        enrolled = self.enrollment_repo.get_by_id(session.class_id, student_id)
-        if not enrolled:
+        # Student must be enrolled in the class
+        if not self.enrollment_repo.get_by_id(session.class_id, student_id):
             raise ValueError("You are not enrolled in this class.")
 
-        # pin check if enabled
+        # PIN validation if enabled
         if int(session.pin_enabled) == 1:
-            if not pin_input or pin_input != (session.pin_code or ""):
+            if not pin_input:
+                raise ValueError("PIN is required.")
+            validate_pin(pin_input)
+            if pin_input != (session.pin_code or ""):
                 raise ValueError("Invalid PIN.")
 
-        # prevent duplicate
-        existing = self.attendance_repo.get_by_session_student(session_id, student_id)
-        if existing:
-            raise ValueError("Student already checked in.")
+        # Prevent duplicate
+        if self.attendance_repo.get_by_session_student(session_id, student_id):
+            raise ValueError("Already checked-in.")
 
         now_s = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.attendance_repo.create(
@@ -137,37 +55,74 @@ class AttendanceService:
         )
 
     # -----------------------
+    # UC03: View Attendance
+    # -----------------------
+    def list_student_attendance(
+        self,
+        student_id: int,
+        *,
+        class_id: Optional[int] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        validate_date_range(date_from, date_to)
+
+        conn = get_conn()
+        params: list[Any] = [student_id]
+        where = ["ar.student_id = ?"]
+
+        if class_id is not None:
+            where.append("s.class_id = ?")
+            params.append(class_id)
+        if date_from is not None:
+            where.append("s.session_date >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            where.append("s.session_date <= ?")
+            params.append(date_to)
+
+        rows = conn.execute(
+            f"""
+            SELECT
+                ar.session_id,
+                s.session_date,
+                s.start_time,
+                s.class_id,
+                ar.status,
+                COALESCE(ar.note,'-') AS note
+            FROM attendance_records ar
+            JOIN attendance_sessions s ON ar.session_id = s.session_id
+            WHERE {' AND '.join(where)}
+            ORDER BY s.session_date DESC, s.start_time DESC
+            """,
+            tuple(params),
+        ).fetchall()
+        conn.close()
+
+        return [dict(r) for r in rows]
+
+    # -----------------------
     # UC07: Lecturer record attendance
     # -----------------------
-    def update_status(
-        self,
-        session_id: int,
-        student_id: int,
-        status: str,
-        note: Optional[str] = None,
-    ) -> None:
+    def update_status(self, session_id: int, student_id: int, status: str, note: Optional[str] = None) -> None:
         session = self.session_repo.get_by_id(session_id)
         if not session:
             raise ValueError("Session not found.")
-
         if session.status == SessionStatus.CLOSED.value:
             raise ValueError("Cannot update attendance. Session is closed.")
 
-        # lecturer should only update students in the class
-        enrolled = self.enrollment_repo.get_by_id(session.class_id, student_id)
-        if not enrolled:
+        # Student must be enrolled
+        if not self.enrollment_repo.get_by_id(session.class_id, student_id):
             raise ValueError("Student is not enrolled in this class.")
 
-        # ensure status is valid
         allowed = {s.value for s in AttendanceStatus}
         if status not in allowed:
             raise ValueError(f"Invalid status. Allowed: {', '.join(sorted(allowed))}.")
 
-        record = self.attendance_repo.get_by_session_student(session_id, student_id)
-        if record:
+        rec = self.attendance_repo.get_by_session_student(session_id, student_id)
+        if rec:
             self.attendance_repo.update(session_id, student_id, status=status, note=note)
         else:
-            # create missing record (valid for UC07)
             self.attendance_repo.create(
                 session_id=session_id,
                 student_id=student_id,
@@ -180,26 +135,23 @@ class AttendanceService:
         session = self.session_repo.get_by_id(session_id)
         if not session:
             raise ValueError("Session not found.")
-
         if session.status == SessionStatus.CLOSED.value:
             raise ValueError("Cannot mark attendance. Session is closed.")
 
         enrollments = self.enrollment_repo.list_by_filter(class_id=session.class_id)
         for e in enrollments:
-            student_id = e.student_id
-            record = self.attendance_repo.get_by_session_student(session_id, student_id)
-            if record:
-                self.attendance_repo.update(session_id, student_id, status=AttendanceStatus.PRESENT.value)
+            rec = self.attendance_repo.get_by_session_student(session_id, e.student_id)
+            if rec:
+                self.attendance_repo.update(session_id, e.student_id, status=AttendanceStatus.PRESENT.value)
             else:
                 self.attendance_repo.create(
                     session_id=session_id,
-                    student_id=student_id,
+                    student_id=e.student_id,
                     status=AttendanceStatus.PRESENT.value,
                     checkin_time=None,
                     note=None,
                 )
 
-    # tiện cho UI lecturer: lấy roster + status hiện tại
     def get_roster_for_session(self, session_id: int) -> list[dict[str, Any]]:
         session = self.session_repo.get_by_id(session_id)
         if not session:
@@ -211,7 +163,7 @@ class AttendanceService:
             SELECT
                 u.user_id AS student_id,
                 COALESCE(u.full_name, u.username) AS student_name,
-                ar.status AS status
+                COALESCE(ar.status, ?) AS status
             FROM enrollments e
             JOIN users u ON e.student_id = u.user_id
             LEFT JOIN attendance_records ar
@@ -219,16 +171,7 @@ class AttendanceService:
             WHERE e.class_id = ?
             ORDER BY u.full_name, u.username
             """,
-            (session_id, session.class_id),
+            (AttendanceStatus.ABSENT.value, session_id, session.class_id),
         ).fetchall()
         conn.close()
-
-        out = []
-        for r in rows:
-            out.append({
-                "student_id": r["student_id"],
-                "student_name": r["student_name"],
-                "status": r["status"] or AttendanceStatus.ABSENT.value,
-            })
-        return out
->>>>>>> 3d2a3a6ce2aa9e67efd1f371c942dfa4cf195bae
+        return [dict(r) for r in rows]

@@ -90,7 +90,11 @@ class SessionRepo:
         conn.commit()
         if self._external_conn is None:
             conn.close()
-        return int(cur.lastrowid)
+        new_id = cur.lastrowid
+        if new_id is None:
+            raise RuntimeError("Insert failed: lastrowid is None")
+        return int(new_id)
+
 
     def update(self, session_id: int, *, status: Optional[str] = None, pin_code: Optional[str] = None) -> None:
         fields, params = [], []

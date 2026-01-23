@@ -19,7 +19,7 @@ class CreateSessionInput:
     duration_min: int
     pin_enabled: bool
     pin_code: Optional[str] = None
-    lecturer_id: Optional[int] = None  # optional: check class belongs to lecturer
+    lecturer_id: Optional[int] = None  # optional check ownership
 
 
 class SessionService:
@@ -30,33 +30,27 @@ class SessionService:
         self.class_repo = ClassRepo()
 
     def create_session(self, data: CreateSessionInput) -> int:
-        # Validate
         validate_date(data.session_date)
         validate_time(data.start_time)
         validate_duration_minutes(data.duration_min)
 
-        # Check class exists (+ optional lecturer ownership)
         cls = self.class_repo.get_by_id(data.class_id)
         if not cls:
             raise ValueError("Class not found.")
         if data.lecturer_id is not None and cls.lecturer_id != data.lecturer_id:
             raise ValueError("You are not the lecturer of this class.")
 
-        # PIN policy
         pin_code: Optional[str] = None
         pin_enabled_int = 1 if data.pin_enabled else 0
-
         if data.pin_enabled:
-            if data.pin_code:
-                pin_code = validate_pin(data.pin_code)
+            if data.pin_code and data.pin_code.strip():
+                pin_code = validate_pin(data.pin_code.strip())
             else:
-                # auto-generate 6 digits
                 pin_code = f"{secrets.randbelow(1_000_000):06d}"
 
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Insert
-        session_id = self.session_repo.create(
+        return self.session_repo.create(
             class_id=data.class_id,
             session_date=data.session_date,
             start_time=data.start_time,
@@ -66,14 +60,11 @@ class SessionService:
             status=SessionStatus.OPEN.value,
             created_at=created_at,
         )
-        return session_id
 
     def close_session(self, session_id: int) -> None:
         session = self.session_repo.get_by_id(session_id)
         if not session:
             raise ValueError("Session not found.")
-
         if session.status == SessionStatus.CLOSED.value:
             return
-
         self.session_repo.update(session_id, status=SessionStatus.CLOSED.value)

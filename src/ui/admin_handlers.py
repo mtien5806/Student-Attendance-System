@@ -1,172 +1,168 @@
 from __future__ import annotations
 
-from typing import Optional
-
-from src.models.enums import AttendanceStatus
 from src.services.admin_service import AdminService
-from src.ui.menus import show_admin_menu
-from src.ui.prompts import prompt_choice, prompt_text, prompt_yes_no
+from src.ui.prompts import prompt_choice, prompt_text
 
 
-def _prompt_int(label: str, *, allow_blank: bool = False) -> Optional[int]:
-    while True:
-        raw = prompt_text(label)
-        if allow_blank and raw == "":
-            return None
+class AdminHandlers:
+    """UC05 Search Attendance; UC10 Manage Attendance handlers."""
+
+    def __init__(self) -> None:
+        self._admin_service = AdminService()
+
+    def admin_menu(self) -> None:
+        """Main admin menu - Navigate between Search and Manage."""
+        while True:
+            print("\n" + "=" * 60)
+            print("ADMIN MENU")
+            print("=" * 60)
+            print("\n1. Search Attendance (UC05)")
+            print("2. Manage Attendance (UC10)")
+            print("3. Done")
+
+            choice = prompt_choice("\nSelection: ")
+
+            if choice == "1":
+                self.search_attendance_menu()
+            elif choice == "2":
+                self.manage_attendance_menu()
+            elif choice == "3":
+                print("\n Goodbye!")
+                break
+            else:
+                print("\n Invalid choice. Please try again.")
+
+    def search_attendance_menu(self) -> None:
+        """UC05: Search Attendance - Tìm kiếm nhanh chóng khi kiểm tra."""
+        print("\n" + "=" * 60)
+        print("SEARCH ATTENDANCE (UC05)")
+        print("=" * 60)
+
+        print("\nFilters (nhập để tìm, bỏ trống để bỏ qua):")
+        student_id_input = prompt_text("Student ID (optional): ")
+        session_id_input = prompt_text("Session ID (optional): ")
+        class_id_input = prompt_text("Class ID (optional): ")
+        date_from_input = prompt_text("Date From (YYYY-MM-DD, optional): ")
+        date_to_input = prompt_text("Date To (YYYY-MM-DD, optional): ")
+
+        # Convert to appropriate types or None
+        student_id = int(student_id_input) if student_id_input else None
+        session_id = int(session_id_input) if session_id_input else None
+        class_id = int(class_id_input) if class_id_input else None
+        date_from = date_from_input if date_from_input else None
+        date_to = date_to_input if date_to_input else None
+
         try:
-            return int(raw)
-        except ValueError:
-            print("Invalid number. Please try again.")
+            results = self._admin_service.search_attendance(
+                student_id=student_id,
+                session_id=session_id,
+                class_id=class_id,
+                date_from=date_from,
+                date_to=date_to,
+            )
 
+            if not results:
+                print("\n  No records found.")
+                return
 
-def _prompt_status() -> str:
-    print("New Status: 1. Present  2. Late  3. Absent  4. Excused")
-    while True:
-        c = prompt_choice("Selection: ")
-        mapping = {
-            "1": AttendanceStatus.PRESENT.value,
-            "2": AttendanceStatus.LATE.value,
-            "3": AttendanceStatus.ABSENT.value,
-            "4": AttendanceStatus.EXCUSED.value,
-        }
-        if c in mapping:
-            return mapping[c]
-        print("Invalid menu selection. Please try again.")
+            print(f"\n Found {len(results)} record(s):\n")
+            print(f"{'RecordID':<10} {'SessionID':<10} {'StudentID':<10} {'Status':<12} {'Check-in':<20} {'Note':<30}")
+            print("-" * 92)
 
+            for record in results:
+                record_id = record["record_id"]
+                sid = record["session_id"]
+                stud_id = record["student_id"]
+                status = record["status"]
+                checkin_time = record["checkin_time"] or "N/A"
+                note = record["note"][:27] + "..." if record["note"] and len(record["note"]) > 30 else record["note"] or ""
 
-def run_admin_dashboard(*, admin_id: int, admin_name: str) -> None:
-    svc = AdminService()
+                print(f"{record_id:<10} {sid:<10} {stud_id:<10} {status:<12} {checkin_time:<20} {note:<30}")
 
-    while True:
-        print("\n[ADMINISTRATOR DASHBOARD]")
-        print(f"User: {admin_name} (ID: {admin_id})")
-        print("-" * 50)
-        show_admin_menu()
-        print("-" * 50)
+        except ValueError as e:
+            print(f"\n Invalid input: {e}")
+        except Exception as e:
+            print(f"\n Error: {e}")
 
-        sel = prompt_choice("Selection: ")
+    def manage_attendance_menu(self) -> None:
+        """UC10: Manage Attendance - Thêm/sửa/xoá bản ghi."""
+        print("\n" + "=" * 60)
+        print("MANAGE ATTENDANCE (UC10)")
+        print("=" * 60)
 
-        if sel == "0":
-            return
-        if sel == "1":
-            _search_attendance_ui(svc)
-        elif sel == "2":
-            _manage_attendance_ui(svc)
-        else:
-            print("Invalid menu selection. Please try again.")
+        print("\n1. Add Record")
+        print("2. Edit Record")
+        print("3. Delete Record")
+        print("4. Back")
 
+        choice = prompt_choice("\nSelection: ")
 
-def _search_attendance_ui(svc: AdminService) -> None:
-    print("\n[SEARCH ATTENDANCE]")
-    print("Search by: 1. StudentID  2. SessionID  3. Course/Class  4. Date Range  0. Back")
-    choice = prompt_choice("Selection: ")
-    if choice == "0":
-        return
+        if choice == "1":
+            self._add_record()
+        elif choice == "2":
+            self._edit_record()
+        elif choice == "3":
+            self._delete_record()
 
-    student_id = session_id = class_id = None
-    date_from = date_to = None
+    def _add_record(self) -> None:
+        """Add a new attendance record."""
+        print("\n--- Add Attendance Record ---")
+        try:
+            session_id = int(prompt_text("Session ID: "))
+            student_id = int(prompt_text("Student ID: "))
+            status = prompt_text("Status (Present/Late/Absent/Excused): ")
+            note = prompt_text("Note (optional): ")
 
-    if choice == "1":
-        student_id = _prompt_int("Enter Student ID: ")
-    elif choice == "2":
-        session_id = _prompt_int("Enter Session ID: ")
-    elif choice == "3":
-        class_id = _prompt_int("Enter Course/Class ID: ")
-    elif choice == "4":
-        date_from = prompt_text("Enter From Date (YYYY-MM-DD): ") or None
-        date_to = prompt_text("Enter To Date (YYYY-MM-DD): ") or None
-    else:
-        print("Invalid menu selection. Please try again.")
-        return
+            record_id = self._admin_service.add_record(
+                session_id=session_id,
+                student_id=student_id,
+                status=status,
+                note=note if note else None,
+            )
+            print(f"\n Record added successfully (ID: {record_id})")
+        except ValueError as e:
+            print(f"\n Invalid input: {e}")
+        except Exception as e:
+            print(f"\n Error: {e}")
 
-    try:
-        rows = svc.search_attendance(
-            student_id=student_id,
-            session_id=session_id,
-            class_id=class_id,
-            date_from=date_from,
-            date_to=date_to,
-        )
-    except Exception as e:
-        print(f"Error: {e}")
-        return
+    def _edit_record(self) -> None:
+        """Edit an existing attendance record."""
+        print("\n--- Edit Attendance Record ---")
+        try:
+            session_id = int(prompt_text("Session ID: "))
+            student_id = int(prompt_text("Student ID: "))
+            status = prompt_text("New Status (Present/Late/Absent/Excused): ")
+            note = prompt_text("New Note (optional): ")
 
-    print("-" * 50)
-    if not rows:
-        print("No matching records.")
-        return
+            self._admin_service.edit_record(
+                session_id=session_id,
+                student_id=student_id,
+                status=status,
+                note=note if note else None,
+            )
+            print("\n Record updated successfully")
+        except ValueError as e:
+            print(f"\n Invalid input: {e}")
+        except Exception as e:
+            print(f"\n Error: {e}")
 
-    print("RecordID | SessionID | Class | Date | StudentID | StudentName | Status | Checkin | Note")
-    print("-" * 50)
-    for r in rows:
-        print(
-            f"{r['record_id']} | {r['session_id']} | {r['class_code']} | {r['session_date']} | "
-            f"{r['student_id']} | {r['student_name']} | {r['status']} | {r.get('checkin_time') or ''} | {r.get('note') or ''}"
-        )
+    def _delete_record(self) -> None:
+        """Delete an attendance record."""
+        print("\n--- Delete Attendance Record ---")
+        try:
+            session_id = int(prompt_text("Session ID: "))
+            student_id = int(prompt_text("Student ID: "))
 
-
-def _manage_attendance_ui(svc: AdminService) -> None:
-    while True:
-        print("\n[MANAGE ATTENDANCE]")
-        print("Actions:")
-        print("1. Add missing attendance record")
-        print("2. Edit attendance status")
-        print("3. Delete duplicated/incorrect record")
-        print("0. Back")
-        print("-" * 50)
-
-        sel = prompt_choice("Selection: ")
-
-        if sel == "0":
-            return
-        if sel == "1":
-            _manage_add(svc)
-        elif sel == "2":
-            _manage_edit(svc)
-        elif sel == "3":
-            _manage_delete(svc)
-        else:
-            print("Invalid menu selection. Please try again.")
-
-
-def _manage_add(svc: AdminService) -> None:
-    session_id = _prompt_int("Enter Session ID: ")
-    student_id = _prompt_int("Enter Student ID: ")
-    status = _prompt_status()
-    note = prompt_text("Reason/Note (optional): ") or None
-    if not prompt_yes_no("Confirm (Y/N): "):
-        print("Cancelled.")
-        return
-    try:
-        rid = svc.add_record(session_id=session_id, student_id=student_id, status=status, note=note)
-        print(f"Added record_id={rid}.")
-    except Exception as e:
-        print(f"Error: {e}")
-
-
-def _manage_edit(svc: AdminService) -> None:
-    session_id = _prompt_int("Enter Session ID: ")
-    student_id = _prompt_int("Enter Student ID: ")
-    status = _prompt_status()
-    note = prompt_text("Reason/Note (optional): ") or None
-    if not prompt_yes_no("Confirm (Y/N): "):
-        print("Cancelled.")
-        return
-    try:
-        svc.edit_record(session_id=session_id, student_id=student_id, status=status, note=note)
-        print("Updated.")
-    except Exception as e:
-        print(f"Error: {e}")
-
-
-def _manage_delete(svc: AdminService) -> None:
-    session_id = _prompt_int("Enter Session ID: ")
-    student_id = _prompt_int("Enter Student ID: ")
-    if not prompt_yes_no("Confirm deletion (Y/N): "):
-        print("Cancelled.")
-        return
-    try:
-        svc.delete_record(session_id=session_id, student_id=student_id)
-        print("Deleted (if existed).")
-    except Exception as e:
-        print(f"Error: {e}")
+            confirm = input(f"\n  Confirm delete record (Session {session_id}, Student {student_id})? (y/n): ").strip().lower()
+            if confirm in ("y", "yes"):
+                self._admin_service.delete_record(
+                    session_id=session_id,
+                    student_id=student_id,
+                )
+                print(" Record deleted successfully")
+            else:
+                print(" Deletion cancelled")
+        except ValueError as e:
+            print(f"\n Invalid input: {e}")
+        except Exception as e:
+            print(f"\n Error: {e}")

@@ -46,20 +46,45 @@ class AttendanceRepo:
         *,
         session_id: int | None = None,
         student_id: int | None = None,
+        class_id: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> list[AttendanceRow]:
         conn = self._conn()
+        query = "SELECT ar.* FROM attendance_records ar"
+        params = []
+        where_clauses = []
+
+        # Join with sessions table nếu cần filter by class_id hoặc date range
+        if class_id is not None or date_from is not None or date_to is not None:
+            query += " JOIN sessions s ON ar.session_id = s.session_id"
+
+        if student_id is not None:
+            where_clauses.append("ar.student_id = ?")
+            params.append(student_id)
+
         if session_id is not None:
-            rows = conn.execute(
-                "SELECT * FROM attendance_records WHERE session_id=? ORDER BY student_id",
-                (session_id,),
-            ).fetchall()
-        elif student_id is not None:
-            rows = conn.execute(
-                "SELECT * FROM attendance_records WHERE student_id=? ORDER BY session_id DESC",
-                (student_id,),
-            ).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM attendance_records ORDER BY session_id DESC").fetchall()
+            where_clauses.append("ar.session_id = ?")
+            params.append(session_id)
+
+        if class_id is not None:
+            where_clauses.append("s.class_id = ?")
+            params.append(class_id)
+
+        if date_from is not None:
+            where_clauses.append("DATE(s.session_date) >= ?")
+            params.append(date_from)
+
+        if date_to is not None:
+            where_clauses.append("DATE(s.session_date) <= ?")
+            params.append(date_to)
+
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+
+        query += " ORDER BY ar.session_id DESC, ar.student_id"
+
+        rows = conn.execute(query, tuple(params)).fetchall()
 
         if self._external_conn is None:
             conn.close()

@@ -79,19 +79,6 @@ class ReportService:
     def export_excel(
         self, class_id: int, output_path: str, date_from: Optional[str] = None, date_to: Optional[str] = None
     ) -> str:
-        """
-        UC13: Export attendance report to Excel.
-        Tạo 2 sheets: Summary (counts per student) + Detail (tất cả records).
-        
-        Args:
-            class_id: Class ID
-            output_path: Đường dẫn thư mục để lưu file
-            date_from: Optional date filter (YYYY-MM-DD)
-            date_to: Optional date filter (YYYY-MM-DD)
-        
-        Returns:
-            Đường dẫn file Excel được tạo
-        """
         # Ensure output directory exists
         os.makedirs(output_path, exist_ok=True)
         

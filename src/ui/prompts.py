@@ -12,16 +12,7 @@ def prompt_text(label: str) -> str:
 
 
 def prompt_password(label: str = "Password: ") -> str:
-    """Prompt for password.
-
-    Spec requires masked input. In some terminals (VS Code Debug Console),
-    getpass may fail, so we fallback to normal input instead of crashing.
-    """
-    try:
-        return getpass.getpass(label)
-    except Exception:
-        # Fallback: unmasked
-        return input(label).strip()
+    return input(label)
 
 
 def prompt_yes_no(label: str) -> bool:

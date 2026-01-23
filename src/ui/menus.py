@@ -11,7 +11,6 @@ def show_main_menu() -> None:
 
 
 def show_student_menu() -> None:
-    print("\n[STUDENT DASHBOARD]")
     print("1. Take Attendance (Check-in)")
     print("2. View Attendance")
     print("3. Submit Absence/Late Request")
@@ -20,7 +19,6 @@ def show_student_menu() -> None:
 
 
 def show_lecturer_menu() -> None:
-    print("\n[LECTURER DASHBOARD]")
     print("1. Create Attendance Session")
     print("2. Record Attendance")
     print("3. Approve/Reject Absence/Late Requests")
@@ -30,7 +28,6 @@ def show_lecturer_menu() -> None:
 
 
 def show_admin_menu() -> None:
-    print("\n[ADMINISTRATOR DASHBOARD]")
     print("1. Search Attendance")
     print("2. Manage Attendance")
     print("0. Logout")

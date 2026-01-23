@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.models.enums import AttendanceStatus, RequestStatus
+from src.models.enums import AttendanceStatus
 from src.services.session_service import SessionService, CreateSessionInput
 from src.services.attendance_service import AttendanceService
 from src.services.request_service import RequestService
@@ -10,36 +10,37 @@ from src.ui.menus import show_lecturer_menu
 from src.ui.prompts import prompt_choice, prompt_text, prompt_yes_no
 
 
-def _prompt_int(label: str) -> int:
+def _prompt_int(label: str, *, allow_zero: bool = False) -> int:
     while True:
-        v = prompt_text(label)
+        raw = prompt_text(label)
         try:
-            return int(v)
+            v = int(raw)
+            if v == 0 and not allow_zero:
+                print("Value must be > 0.")
+                continue
+            return v
         except ValueError:
             print("Invalid number. Please try again.")
 
 
 def _prompt_status() -> str:
-    print("Status: 1. Present  2. Late  3. Absent  4. Excused")
+    print("New Status: 1. Present  2. Late  3. Absent  4. Excused")
     while True:
         c = prompt_choice("Selection: ")
-        m = {
+        mapping = {
             "1": AttendanceStatus.PRESENT.value,
             "2": AttendanceStatus.LATE.value,
             "3": AttendanceStatus.ABSENT.value,
             "4": AttendanceStatus.EXCUSED.value,
         }
-        if c in m:
-            return m[c]
-        print("Invalid selection. Try again.")
+        if c in mapping:
+            return mapping[c]
+        print("Invalid menu selection. Please try again.")
 
 
 def run_lecturer_dashboard(lecturer_user) -> None:
     """
-    lecturer_user: UserRow (from login)
-      - user_id
-      - full_name
-      - role
+    Spec 8.6 Lecturer Dashboard and Screens.
     """
     session_service = SessionService()
     attendance_service = AttendanceService()
@@ -48,18 +49,15 @@ def run_lecturer_dashboard(lecturer_user) -> None:
     class_repo = ClassRepo()
 
     while True:
-        pending = request_service.list_pending_for_lecturer(lecturer_user.user_id)
-        pending_count = len(pending)
-
+        pending = request_service.list_requests_for_lecturer(lecturer_user.user_id, pending_only=True)
         print("\n[LECTURER DASHBOARD]")
         print(f"User: {lecturer_user.full_name} (ID: {lecturer_user.user_id})")
-        print(f"Pending Requests: {pending_count}")
+        print(f"Pending Requests: {len(pending)}")
         print("-" * 50)
         show_lecturer_menu()
         print("-" * 50)
 
         c = prompt_choice("Selection: ")
-
         if c == "0":
             return
         elif c == "1":
@@ -69,32 +67,23 @@ def run_lecturer_dashboard(lecturer_user) -> None:
         elif c == "3":
             _ui_process_requests(request_service, lecturer_user.user_id)
         elif c == "4":
-            _ui_summarize(report_service, class_repo, lecturer_user.user_id)
+            _ui_summarize(report_service)
         elif c == "5":
-            _ui_export(report_service, class_repo, lecturer_user.user_id)
+            _ui_export(report_service)
         else:
-            print("Invalid selection. Please try again.")
+            print("Invalid menu selection. Please try again.")
 
 
 def _ui_create_session(session_service: SessionService, class_repo: ClassRepo, lecturer_id: int) -> None:
-    print("\n[CREATE ATTENDANCE SESSION]")
-    classes = class_repo.list_by_filter(lecturer_id=lecturer_id)
-    if not classes:
-        print("You have no classes.")
-        return
-
-    print("Your classes:")
-    for c in classes:
-        print(f"- ClassID={c.class_id} | {c.class_code} | {c.class_name}")
-
-    class_id = _prompt_int("Enter Class ID: ")
-    session_date = prompt_text("Enter Date (YYYY-MM-DD): ")
-    start_time = prompt_text("Enter Start Time (HH:MM): ")
-    duration = _prompt_int("Enter Duration (minutes): ")
-    pin_enabled = prompt_yes_no("Enable PIN? (Y/N): ")
+    print("\n[CREATE SESSION]")
+    class_id = _prompt_int("Enter Course/Class ID: ")
+    session_date = prompt_text("Session Date (YYYY-MM-DD): ")
+    start_time = prompt_text("Start Time (HH:MM): ")
+    duration = _prompt_int("Duration (minutes): ")
+    pin_enabled = prompt_yes_no("Require PIN? (Y/N): ")
     pin_code = None
     if pin_enabled:
-        pin_code = prompt_text("Enter PIN (4-6 digits) or leave blank to auto-generate: ") or None
+        pin_code = prompt_text("If Yes, enter PIN (4–6 digits) or leave blank to auto-generate: ") or None
 
     try:
         sid = session_service.create_session(
@@ -108,27 +97,36 @@ def _ui_create_session(session_service: SessionService, class_repo: ClassRepo, l
                 lecturer_id=lecturer_id,
             )
         )
-        print(f"Session created successfully. SessionID={sid}")
+        session = session_service.session_repo.get_by_id(sid)
+        print("-" * 50)
+        print("Session created successfully.")
+        print(f"Session ID: {sid}")
+        if int(session.pin_enabled) == 1:
+            print(f"PIN (if enabled): {session.pin_code}")
+        print(f"Status: {session.status}")
     except Exception as e:
         print(f"Error: {e}")
 
 
 def _ui_record_attendance(attendance_service: AttendanceService, session_service: SessionService) -> None:
-    print("\n[RECORD ATTENDANCE]")
+    print("\n[RECORD  ATTENDANCE]")
     session_id = _prompt_int("Enter Session ID: ")
 
     try:
-        session = session_service.session_repo.get_by_id(session_id)
-        if not session:
-            print("Session not found.")
-            return
+        # Print roster table immediately (spec)
+        roster = attendance_service.get_roster_for_session(session_id)
+        print("-" * 50)
+        print("StudentID | StudentName | Current Status")
+        print("--------- | ----------- | --------------")
+        for r in roster:
+            print(f"{r['student_id']} | {r['student_name']} | {r['status']}")
+        print("-" * 50)
 
         while True:
-            print("\nActions:")
-            print("1. View roster/status")
-            print("2. Update one student status")
-            print("3. Mark ALL Present")
-            print("4. Close session")
+            print("Actions:")
+            print("1. Update a student status")
+            print("2. Mark all as Present (batch)")
+            print("3. Close session")
             print("0. Back")
             sel = prompt_choice("Selection: ")
 
@@ -136,17 +134,9 @@ def _ui_record_attendance(attendance_service: AttendanceService, session_service
                 return
 
             if sel == "1":
-                roster = attendance_service.get_roster_for_session(session_id)
-                print("StudentID | StudentName | Status")
-                print("-" * 50)
-                for r in roster:
-                    print(f"{r['student_id']} | {r['student_name']} | {r['status']}")
-                continue
-
-            if sel == "2":
-                student_id = _prompt_int("Enter Student ID: ")
+                student_id = _prompt_int("Enter StudentID: ")
                 status = _prompt_status()
-                note = prompt_text("Note (optional): ") or None
+                note = prompt_text("Optional Note: ") or None
                 if not prompt_yes_no("Confirm (Y/N): "):
                     print("Cancelled.")
                     continue
@@ -154,105 +144,105 @@ def _ui_record_attendance(attendance_service: AttendanceService, session_service
                 print("Updated.")
                 continue
 
-            if sel == "3":
-                if not prompt_yes_no("Mark all present? (Y/N): "):
+            if sel == "2":
+                if not prompt_yes_no("Confirm (Y/N): "):
                     print("Cancelled.")
                     continue
                 attendance_service.mark_all_present(session_id)
                 print("Done.")
                 continue
 
-            if sel == "4":
-                if not prompt_yes_no("Close this session? (Y/N): "):
+            if sel == "3":
+                if not prompt_yes_no("Confirm (Y/N): "):
                     print("Cancelled.")
                     continue
                 session_service.close_session(session_id)
                 print("Session closed.")
                 continue
 
-            print("Invalid selection.")
+            print("Invalid menu selection. Please try again.")
     except Exception as e:
         print(f"Error: {e}")
 
 
 def _ui_process_requests(request_service: RequestService, lecturer_id: int) -> None:
     print("\n[PROCESS REQUESTS]")
-    pending = request_service.list_pending_for_lecturer(lecturer_id)
-    if not pending:
-        print("No pending requests.")
+    print("Filter: 1. Pending only  2. All")
+    f = prompt_choice("Selection: ")
+    pending_only = (f != "2")
+
+    requests = request_service.list_requests_for_lecturer(lecturer_id, pending_only=pending_only)
+    print("-" * 50)
+    if not requests:
+        print("No requests found.")
         return
 
-    print("Pending Requests:")
-    print("ReqID | Class | Date | Student | Type | Reason")
-    print("-" * 80)
-    for r in pending:
-        print(f"{r['request_id']} | {r['class_code']} | {r['session_date']} {r['start_time']} | "
-              f"{r['student_name']} | {r['request_type']} | {r['reason']}")
+    print("RequestID | StudentID | SessionID | Type  | Reason (short) | Status")
+    print("--------- | --------- | --------- | ----- | -------------- | ------")
+    for r in requests:
+        reason = (r["reason"][:12] + "...") if len(r["reason"]) > 15 else r["reason"]
+        print(f"{r['request_id']} | {r['student_id']} | {r['session_id']} | {r['request_type']} | {reason} | {r['status']}")
 
-    req_id = _prompt_int("Enter Request ID to process: ")
-    print("1. Approve")
-    print("2. Reject")
+    rid = _prompt_int("Enter RequestID to process (or 0 to back): ", allow_zero=True)
+    if rid == 0:
+        return
+
+    print("Action: 1. Approve  2. Reject")
     act = prompt_choice("Selection: ")
-    comment = prompt_text("Lecturer comment (optional): ") or None
+    comment = prompt_text("Lecturer Comment (optional): ") or None
+    if not prompt_yes_no("Confirm (Y/N): "):
+        print("Cancelled.")
+        return
 
     try:
         if act == "1":
-            request_service.approve(req_id, lecturer_comment=comment)
+            request_service.approve(rid, lecturer_comment=comment)
             print("Approved.")
         elif act == "2":
-            request_service.reject(req_id, lecturer_comment=comment)
+            request_service.reject(rid, lecturer_comment=comment)
             print("Rejected.")
         else:
-            print("Invalid selection.")
+            print("Invalid action.")
     except Exception as e:
         print(f"Error: {e}")
 
 
-def _ui_summarize(report_service: ReportService, class_repo: ClassRepo, lecturer_id: int) -> None:
+def _ui_summarize(report_service: ReportService) -> None:
     print("\n[SUMMARIZE ATTENDANCE]")
-    classes = class_repo.list_by_filter(lecturer_id=lecturer_id)
-    if not classes:
-        print("You have no classes.")
-        return
-
-    for c in classes:
-        print(f"- ClassID={c.class_id} | {c.class_code} | {c.class_name}")
-
-    class_id = _prompt_int("Enter Class ID: ")
-    date_from = prompt_text("From date (YYYY-MM-DD) or blank: ") or None
-    date_to = prompt_text("To date (YYYY-MM-DD) or blank: ") or None
+    class_id = _prompt_int("Enter Course/Class ID: ")
+    date_from = prompt_text("Optional Date Range: From (YYYY-MM-DD): ") or None
+    date_to = prompt_text("To (YYYY-MM-DD): ") or None
+    print("-" * 50)
 
     try:
         rows = report_service.summarize(class_id, date_from=date_from, date_to=date_to)
         if not rows:
             print("No data.")
             return
-        print("StudentID | Present | Late | Absent | Excused | Total")
-        print("-" * 60)
+        print("StudentID | Present | Late | Absent | Attendance Rate")
+        print("--------- | ------- | ---- | ------ | ---------------")
         for r in rows:
-            print(f"{r['student_id']} | {r['present']} | {r['late']} | {r['absent']} | {r['excused']} | {r['total']}")
+            print(f"{r['student_id']} | {r['present']:>7} | {r['late']:>4} | {r['absent']:>6} | {r['attendance_rate']}%")
     except Exception as e:
         print(f"Error: {e}")
 
 
-def _ui_export(report_service: ReportService, class_repo: ClassRepo, lecturer_id: int) -> None:
-    print("\n[EXPORT EXCEL REPORT]")
-    classes = class_repo.list_by_filter(lecturer_id=lecturer_id)
-    if not classes:
-        print("You have no classes.")
-        return
-    for c in classes:
-        print(f"- ClassID={c.class_id} | {c.class_code} | {c.class_name}")
+def _ui_export(report_service: ReportService) -> None:
+    print("\n[EXPORT REPORT]")
+    class_id = _prompt_int("Enter Course/Class ID: ")
+    date_from = prompt_text("Optional Date Range: From (YYYY-MM-DD): ") or None
+    date_to = prompt_text("To (YYYY-MM-DD): ") or None
+    output_file = prompt_text("Enter output file path (e.g., reports/CSE101_Attendance.xlsx): ")
+    if not output_file:
+        output_file = "reports/report.xlsx"
 
-    class_id = _prompt_int("Enter Class ID: ")
-    date_from = prompt_text("From date (YYYY-MM-DD) or blank: ") or None
-    date_to = prompt_text("To date (YYYY-MM-DD) or blank: ") or None
-    output_path = prompt_text("Enter output folder (e.g., reports): ")
-    if not output_path:
-        output_path = "reports"
+    if not prompt_yes_no("Confirm export (Y/N): "):
+        print("Cancelled.")
+        return
 
     try:
-        file_path = report_service.export_excel(class_id, output_path, date_from=date_from, date_to=date_to)
-        print(f"Exported: {file_path}")
+        path = report_service.export_excel(class_id, output_file, date_from=date_from, date_to=date_to)
+        print("Export completed successfully.")
+        print(f"Saved to: {path}")
     except Exception as e:
         print(f"Error: {e}")

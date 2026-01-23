@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
+from datetime import datetime
 import secrets
 
-from src.utils import validators
+from src.models.enums import SessionStatus
+from src.utils.validators import validate_date, validate_time, validate_duration_minutes, validate_pin
 from src.repositories.session_repo import SessionRepo
+from src.repositories.class_repo import ClassRepo
 
 
 @dataclass
@@ -16,49 +19,61 @@ class CreateSessionInput:
     duration_min: int
     pin_enabled: bool
     pin_code: Optional[str] = None
+    lecturer_id: Optional[int] = None  # optional: check class belongs to lecturer
 
 
 class SessionService:
-    """UC06 Create Attendance Session; UC07 Close session (skeleton)."""
+    """UC06 Create Attendance Session; UC07 Close Session."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.session_repo = SessionRepo()
+        self.class_repo = ClassRepo()
 
     def create_session(self, data: CreateSessionInput) -> int:
-        # Validate input formats
-        validators.validate_date(data.session_date)
-        validators.validate_time(data.start_time)
-        validators.validate_duration_minutes(data.duration_min)
-        validators.validate_date_range()
+        # Validate
+        validate_date(data.session_date)
+        validate_time(data.start_time)
+        validate_duration_minutes(data.duration_min)
+
+        # Check class exists (+ optional lecturer ownership)
+        cls = self.class_repo.get_by_id(data.class_id)
+        if not cls:
+            raise ValueError("Class not found.")
+        if data.lecturer_id is not None and cls.lecturer_id != data.lecturer_id:
+            raise ValueError("You are not the lecturer of this class.")
 
         # PIN policy
+        pin_code: Optional[str] = None
+        pin_enabled_int = 1 if data.pin_enabled else 0
+
         if data.pin_enabled:
             if data.pin_code:
-                validators.validate_pin(data.pin_code)
+                pin_code = validate_pin(data.pin_code)
             else:
-                # auto-generate if not provided
-                data.pin_code = f"{secrets.randbelow(1_000_000):06d}"
+                # auto-generate 6 digits
+                pin_code = f"{secrets.randbelow(1_000_000):06d}"
 
-        # ===== TODO IMPLEMENTATION =====
-        session_id = self.session_repo.create({
-            "class_id": data.class_id,
-            "session_date": data.session_date,
-            "start_time": data.start_time,
-            "duration_min": data.duration_min,
-            "pin_enabled": data.pin_enabled,
-            "pin_code": data.pin_code,
-            "status": "OPEN"
-        })
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # Insert
+        session_id = self.session_repo.create(
+            class_id=data.class_id,
+            session_date=data.session_date,
+            start_time=data.start_time,
+            duration_min=data.duration_min,
+            pin_enabled=pin_enabled_int,
+            pin_code=pin_code,
+            status=SessionStatus.OPEN.value,
+            created_at=created_at,
+        )
         return session_id
 
     def close_session(self, session_id: int) -> None:
-        # ===== TODO IMPLEMENTATION =====
         session = self.session_repo.get_by_id(session_id)
         if not session:
-            raise ValueError("Session not found")
+            raise ValueError("Session not found.")
 
-        if session.status == "CLOSED":
-            return  # already closed, no action
+        if session.status == SessionStatus.CLOSED.value:
+            return
 
-        self.session_repo.update_status(session_id, "CLOSED")
+        self.session_repo.update(session_id, status=SessionStatus.CLOSED.value)

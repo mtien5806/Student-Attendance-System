@@ -10,6 +10,28 @@ class AdminHandlers:
     def __init__(self) -> None:
         self._admin_service = AdminService()
 
+    def admin_menu(self) -> None:
+        """Main admin menu - Navigate between Search and Manage."""
+        while True:
+            print("\n" + "=" * 60)
+            print("ADMIN MENU")
+            print("=" * 60)
+            print("\n1. Search Attendance (UC05)")
+            print("2. Manage Attendance (UC10)")
+            print("3. Done")
+
+            choice = prompt_choice("\nSelection: ")
+
+            if choice == "1":
+                self.search_attendance_menu()
+            elif choice == "2":
+                self.manage_attendance_menu()
+            elif choice == "3":
+                print("\n✅ Goodbye!")
+                break
+            else:
+                print("\n❌ Invalid choice. Please try again.")
+
     def search_attendance_menu(self) -> None:
         """UC05: Search Attendance - Tìm kiếm nhanh chóng khi kiểm tra."""
         print("\n" + "=" * 60)
